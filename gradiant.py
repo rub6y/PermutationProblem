@@ -12,6 +12,55 @@ S1 = [
   (16, 20, 19, 15, 11, 12, 4, 8, 7, 24, 3, 0, 22, 2, 25, 1, 23, 17, 21, 18, 14, 10, 13, 9, 5, 6)
 ] 
 
+def get_ordering(a, b, c):
+    vals = np.array([a, b, c])
+    return tuple(np.argsort(np.argsort(vals)))
+
+def is_triple_good(x1, x2, x3):
+    orderings = set()
+    for d in range(6):
+        if x1[d] == x2[d] or x1[d] == x3[d] or x2[d] == x3[d]:
+            break
+        ordering = get_ordering(x1[d], x2[d], x3[d])
+        orderings.add(ordering)
+        if len(orderings) < d + 1: 
+            break
+    return len(orderings) == 6
+
+def sample_gen(sample_count = 200):
+    sample_set = []
+    for _ in range(sample_count):
+        x1 = random.random()
+        x2 = random.random()
+        x3 = 1.5 - x1 - x2 
+        x4 = random.random()
+        x5 = random.random()
+        x6 = 1.5 - x4 - x5
+        if (x6 > 0 and x6 < 1) and (x3 > 0 and x3 < 1):
+            sample_set.append((x1,x2,x3,x4,x5,x6))
+        
+    return sample_set
+
+genereted_samples = sample_gen()
+
+def triples_count(samples):
+    count = 0
+    for x1 in samples:
+        for x2 in samples:
+            for x3 in samples:
+                count += is_triple_good(x1,x2,x3)
+    M = len(samples)
+    normalizer = (M * (M-1)*(M-2))/6  
+    return (count/normalizer, len(samples))
+
+answer = triples_count(genereted_samples)
+
+with open('gradient.txt', 'w') as f:
+    f.write(answer.__str__())
+    f.write("\n")
+    f.write(genereted_samples.__str__())
+
+"""
 S2 = random.sample(S1, len(S1))
 S3 = random.sample(S1, len(S1))
 S4 = random.sample(S1, len(S1))
@@ -29,20 +78,6 @@ def from_perms_to_tensor(perms):
         tensor.append(tmp_pair)
     return tensor
 
-def get_ordering(a, b, c):
-    vals = np.array([a, b, c])
-    return tuple(np.argsort(np.argsort(vals)))
-
-def is_triple_good(x1, x2, x3):
-    orderings = set()
-    for d in range(6):
-        if x1[d] == x2[d] or x1[d] == x3[d] or x2[d] == x3[d]:
-            break
-        ordering = get_ordering(x1[d], x2[d], x3[d])
-        orderings.add(ordering)
-        if len(orderings) < d + 1: 
-            break
-    return len(orderings) == 6
 
 def compute_J_from_tensor(tensor):
     sum = 0
@@ -64,10 +99,8 @@ T8 = from_perms_to_tensor(S8)
 T9 = from_perms_to_tensor(S9)
 T10 = from_perms_to_tensor(S10)
 
-
 T = T2
-
 print(S2)
 
 print(compute_J_from_tensor(T))
-
+"""

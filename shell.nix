@@ -8,6 +8,8 @@ in pkgs.mkShell {
     (pkgs.python3.withPackages (python-pkgs: with python-pkgs; [
       # select Python packages here
       numpy
+      matplotlib
+      numba
     ]))
   ];
 }
