@@ -14,7 +14,14 @@ sys.path.insert(0, str(REPO_ROOT))
 from fw.measure import load_permutations_as_measure as fw_load_witness
 from fw.objective import compute_J as fw_compute_J
 
-from measurelib.measure import Measure, check_marginals, load_witness, marginal_masses
+from measurelib.measure import (
+    Measure,
+    check_marginals,
+    load_a_summary_series,
+    load_records_jsonl,
+    load_witness,
+    marginal_masses,
+)
 from measurelib.functional import J, shattered
 from measurelib.shift import (
     coordinate_transfer,
@@ -138,6 +145,25 @@ def test_pushforward_identity():
     identity = [None] * 6
     same = pushforward(mu, identity)
     assert np.array_equal(np.sort(same.points, axis=0), np.sort(mu.points, axis=0))
+
+
+def test_a_summary_series_loads_valid_measures():
+    series = load_a_summary_series(REPO_ROOT.parent / "a_summary.txt")
+    assert set(series) >= {15, 26, 120}  # spot-check: mixed 0- and 1-indexed blocks
+    for n, (mu, _reported) in series.items():
+        assert mu.n == n
+        check_marginals(mu, tol=1e-9)  # raises on failure
+
+
+def test_records_jsonl_loads_valid_measures_despite_mixed_units():
+    # records.jsonl's config field is inconsistent: most entries are raw
+    # grid indices, at least one is normalized to [0, 1] -- both must load.
+    n_checked = 0
+    for mu, record in load_records_jsonl(REPO_ROOT.parent / "records.jsonl"):
+        assert mu.n == record["M"]
+        check_marginals(mu, tol=1e-6)
+        n_checked += 1
+    assert n_checked > 100
 
 
 def test_anneal_runs_and_stays_in_A_n():

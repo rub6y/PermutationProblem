@@ -12,6 +12,8 @@ the current best record, and measurelib is the general-purpose foundation
 future work (search, ML, construction, proof) builds on.
 """
 
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,6 +72,60 @@ def load_witness(path):
         if sorted(perm) != list(range(n)):
             raise ValueError("each row must be a permutation of range(n)")
     return from_permutations(permutations)
+
+
+_A_SUMMARY_HEADER = re.compile(r"^n\s*=\s*(\d+).*\(([\d.]+)\)\s*$")
+
+
+def load_a_summary_series(path):
+    """Parse a_summary.txt's format: repeated blocks of a `n = <n> ...
+    (<J>)` header (the "-->" between the count and the parenthesized J is
+    present in most but not all blocks, so the regex ignores it) followed by
+    N_COORDS whitespace-separated-integer permutation rows. Returns
+    {n: (Measure, reported_J)} for every block found."""
+    lines = Path(path).read_text().splitlines()
+    result = {}
+    i = 0
+    while i < len(lines):
+        header = _A_SUMMARY_HEADER.match(lines[i])
+        if header:
+            n = int(header.group(1))
+            reported_J = float(header.group(2))
+            perms = []
+            for _ in range(N_COORDS):
+                i += 1
+                perms.append(tuple(int(x) for x in lines[i].split()))
+            # Most blocks are 0-indexed (range(n)); at least one (n=26) is
+            # 1-indexed (range(1, n+1)) -- normalize by each row's own min
+            # rather than trust a fixed convention.
+            perms = [tuple(v - min(row) for v in row) for row in perms]
+            result[n] = (from_permutations(perms), reported_J)
+        i += 1
+    return result
+
+
+def load_records_jsonl(path):
+    """Parse records.jsonl: each line is a JSON record with a `config`
+    field, an (M, 6) array. The log is inconsistent about units: most
+    entries store raw grid indices directly (integers in [0, M)), but at
+    least one (the original S1-seeded record) stores normalized floats in
+    [0, 1] on step 1/(M-1) instead -- detected here by whether the max value
+    is <= 1.0 (raw-index configs go up to M-1 >= 1 for any M > 2). Yields
+    (Measure, record) for every line that has a `config` field."""
+    for line in Path(path).read_text().splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        config = record.get("config")
+        if config is None:
+            continue
+        m = record["M"]
+        arr = np.array(config, dtype=np.float64)
+        if arr.max() <= 1.0:
+            arr = arr * (m - 1)
+        points = np.rint(arr).astype(np.int64)
+        weights = np.full(m, 1.0 / m, dtype=np.float64)
+        yield Measure(points=points, weights=weights, n=m), record
 
 
 def marginal_masses(measure):
