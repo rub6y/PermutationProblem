@@ -2,13 +2,39 @@
 one" primitives.
 
 `interpolate` is the coarse move (jump toward an arbitrary target measure).
-`cycle_move` / `two_coordinate_cycle` / `random_two_coordinate_move` are the
-fine, *local* move: shifting weight around a small alternating cycle of grid
-points changes the measure while leaving every one of the 6 marginals
-exactly fixed, for ANY weighted measure -- not just the equal-weight,
-one-point-per-row permutation measures fw/swap_search.py and
-fw/hyperplane_search.py are restricted to. This is the elementary step
-gradient-descent/annealing style search over general measures needs.
+
+`coordinate_transfer` / `random_coordinate_transfer` are the general-purpose
+*local* move: move epsilon weight between any two positive-weight support
+points that differ in a single coordinate. This always applies (any two
+distinct positive-weight points differ in at least one coordinate), which
+matters because the current best witnesses (a_summary.txt,
+good_permutation.txt) are permutation-shaped -- each grid value appears
+exactly once per axis -- so `two_coordinate_cycle`/`random_two_coordinate_move`
+below (which need two points already agreeing on 4 coordinates) never fire
+on them: confirmed empirically, 0/4000 random attempts found such a pair.
+`coordinate_transfer` generalizes fw/swap_search.py's whole-atom
+transposition (which only works for equal, full-weight atoms) to a
+fractional epsilon transfer, so it works for any weighted measure.
+
+Why coordinate_transfer preserves marginals: points i, j have weights w_i,
+w_j > 0 and differ at coordinate c (values v_i != v_j), agreeing or not
+elsewhere. Move epsilon <= min(w_i, w_j) from i into a new point i' (= i's
+coordinates, but coordinate c set to v_j), and epsilon from j into j' (= j's
+coordinates, coordinate c set to v_i). For coordinate c: value v_i loses
+epsilon (from i) but gains epsilon (from j' landing there) -- net 0; value
+v_j is symmetric -- net 0. For every other coordinate d != c: i and i' agree
+on d (only c changed), so shifting weight between them never moves mass
+between different d-buckets -- net 0 automatically. Same for j, j'.
+
+`cycle_move` / `two_coordinate_cycle` / `random_two_coordinate_move` are a
+second, structurally different move: shifting weight around a small
+alternating cycle of grid points that varies exactly 2 coordinates while
+holding the other 4 fixed. It needs an existing matching pair (see above),
+but unlike coordinate_transfer it can move mass into two brand new
+(currently empty) grid cells at once, which coordinate_transfer cannot (it
+only ever creates one new occupied cell per source point). Useful when the
+measure already has that structure (e.g. genuinely weighted, non-bijective
+measures), documented here for that case.
 
 Why a cycle preserves marginals: pick 2 coordinates (a, b) and hold the
 other 4 coordinates fixed at some tuple `rest`. Within that single fiber,
@@ -23,12 +49,12 @@ is 0 (equal counts of +eps and -eps). For coordinate a (resp. b), each value
 a_i (resp. b_i) is shared by exactly the two points adjacent to it in the
 cycle, one with each sign, so their contributions cancel pairwise.
 
-Known limitation: this only covers moves confined to a single 4-coordinate
-fiber (2 coordinates varying at a time). A general cycle spanning more than
-2 coordinates at once (a "hypergraph augmenting cycle" over the full support)
-would cover strictly more moves but needs real cycle-finding and is left for
-a later round once/if the 2-coordinate move proves too restrictive for the
-search that consumes it.
+Known limitation: the cycle move only covers moves confined to a single
+4-coordinate fiber (2 coordinates varying at a time). A general cycle
+spanning more than 2 coordinates at once (a "hypergraph augmenting cycle"
+over the full support) would cover strictly more moves but needs real
+cycle-finding and is left for a later round once/if the 2-coordinate move
+proves too restrictive for the search that consumes it.
 """
 
 import numpy as np
@@ -50,6 +76,65 @@ def interpolate(mu_a, mu_b, t):
     weights = np.array(list(combined.values()), dtype=np.float64)
     keep = weights > _TOL
     return Measure(points=points[keep], weights=weights[keep], n=mu_a.n)
+
+
+def coordinate_transfer(mu, i, j, coord, epsilon):
+    """Move `epsilon` weight from support point i to a copy of i with
+    `coord` set to point j's value, and epsilon from j to a copy of j with
+    `coord` set to point i's value (see module docstring for why this
+    preserves every marginal exactly). Requires 0 < epsilon <=
+    min(mu.weights[i], mu.weights[j]) and mu.points[i, coord] !=
+    mu.points[j, coord]; raises ValueError otherwise. The general-purpose
+    local move -- applies to any two positive-weight points, regardless of
+    how many other coordinates they agree on."""
+    if mu.points[i, coord] == mu.points[j, coord]:
+        raise ValueError("coordinate_transfer: points already agree on `coord`")
+    if not (0.0 < epsilon <= min(mu.weights[i], mu.weights[j]) + _TOL):
+        raise ValueError("coordinate_transfer: epsilon must be in (0, min(w_i, w_j)]")
+
+    combined = {}
+    for point, weight in zip(map(tuple, mu.points), mu.weights):
+        combined[point] = combined.get(point, 0.0) + weight
+
+    p_i, p_j = tuple(mu.points[i]), tuple(mu.points[j])
+    p_i_new = p_i[:coord] + (p_j[coord],) + p_i[coord + 1:]
+    p_j_new = p_j[:coord] + (p_i[coord],) + p_j[coord + 1:]
+
+    combined[p_i] -= epsilon
+    combined[p_j] -= epsilon
+    combined[p_i_new] = combined.get(p_i_new, 0.0) + epsilon
+    combined[p_j_new] = combined.get(p_j_new, 0.0) + epsilon
+
+    out_points = np.array(list(combined.keys()), dtype=np.int64)
+    out_weights = np.array(list(combined.values()), dtype=np.float64)
+    if np.any(out_weights < -_TOL):
+        raise ValueError("coordinate_transfer: epsilon too large, would go negative")
+    keep = out_weights > _TOL
+    return Measure(points=out_points[keep], weights=out_weights[keep], n=mu.n)
+
+
+def random_coordinate_transfer(mu, rng, epsilon_fraction=0.5, max_attempts=20):
+    """Convenience local move for search/annealing: pick two random distinct
+    positive-weight support points and a random coordinate they differ on,
+    then coordinate_transfer between them with epsilon = epsilon_fraction *
+    min(their two weights). Unlike random_two_coordinate_move, this always
+    succeeds on a generic measure (permutation-shaped or not) within a few
+    attempts, since it needs no coincidental agreement on other coordinates.
+    Returns (new_measure, epsilon) or None if `max_attempts` tries all picked
+    a coordinate the two points happen to already agree on."""
+    m = mu.support_size
+    if m < 2:
+        return None
+    for _ in range(max_attempts):
+        i, j = rng.choice(m, size=2, replace=False)
+        coord = rng.integers(0, N_COORDS)
+        if mu.points[i, coord] == mu.points[j, coord]:
+            continue
+        epsilon = epsilon_fraction * min(mu.weights[i], mu.weights[j])
+        if epsilon <= _TOL:
+            continue
+        return coordinate_transfer(mu, i, j, coord, epsilon), epsilon
+    return None
 
 
 def two_coordinate_cycle(rest_coords, rest_values, coord_a, coord_b, a_seq, b_seq):

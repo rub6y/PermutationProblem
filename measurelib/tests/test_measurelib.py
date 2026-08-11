@@ -17,14 +17,17 @@ from fw.objective import compute_J as fw_compute_J
 from measurelib.measure import Measure, check_marginals, load_witness, marginal_masses
 from measurelib.functional import J, shattered
 from measurelib.shift import (
+    coordinate_transfer,
     cycle_move,
     interpolate,
     pushforward,
+    random_coordinate_transfer,
     random_two_coordinate_move,
     two_coordinate_cycle,
 )
 from measurelib.features import hyperplane_residual, pca
 from measurelib.hyperplane import integrate_subset, restrict_to_hyperplane, slice_integral
+from measurelib.search import anneal
 
 WITNESS_PATH = REPO_ROOT.parent / "good_permutation.txt"
 
@@ -83,6 +86,34 @@ def test_two_coordinate_cycle_preserves_marginals():
     assert n_applied > 0  # the move must actually apply at least once
 
 
+def test_coordinate_transfer_preserves_marginals_on_permutation_witness():
+    # The case two_coordinate_cycle cannot handle: a permutation-shaped
+    # witness where no two points share 4 coordinates.
+    mu = load_witness(WITNESS_PATH)
+    before = marginal_masses(mu)
+    rng = np.random.default_rng(2)
+    n_applied = 0
+    for _ in range(50):
+        result = random_coordinate_transfer(mu, rng, epsilon_fraction=0.3)
+        if result is None:
+            continue
+        moved, epsilon = result
+        assert epsilon > 0
+        assert np.max(np.abs(marginal_masses(moved) - before)) < 1e-9
+        assert np.all(moved.weights >= -1e-12)
+        n_applied += 1
+    assert n_applied > 0
+
+
+def test_coordinate_transfer_rejects_infeasible_epsilon():
+    mu = load_witness(WITNESS_PATH)
+    try:
+        coordinate_transfer(mu, 0, 1, coord=0, epsilon=10.0)
+        assert False, "expected ValueError for infeasible epsilon"
+    except ValueError:
+        pass
+
+
 def test_cycle_move_rejects_infeasible_epsilon():
     mu = load_witness(WITNESS_PATH)
     rest_coords = [2, 3, 4, 5]
@@ -107,6 +138,15 @@ def test_pushforward_identity():
     identity = [None] * 6
     same = pushforward(mu, identity)
     assert np.array_equal(np.sort(same.points, axis=0), np.sort(mu.points, axis=0))
+
+
+def test_anneal_runs_and_stays_in_A_n():
+    mu = load_witness(WITNESS_PATH)
+    result = anneal(mu, n_steps=20, seed=0)
+    assert result.best_J >= J(mu) - 1e-12  # best tracks the seed at minimum
+    assert len(result.history) == 21
+    check_marginals(result.best_measure, tol=1e-6)  # raises on failure
+    check_marginals(result.final_measure, tol=1e-6)
 
 
 def test_hyperplane_residual_near_zero_for_known_witness():
