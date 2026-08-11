@@ -10,6 +10,7 @@ in pkgs.mkShell {
       numpy
       matplotlib
       numba
+      scipy
     ]))
   ];
 }

@@ -2,6 +2,8 @@ import numpy as np
 import random
 from itertools import permutations, combinations
 
+from fw.shattering import shattering_reference as is_triple_good
+
 S3 = [(0, 1, 2), (0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0)]
 
 S_list = []
@@ -10,10 +12,6 @@ for p in permutations(S3, 6):
 
 n = 10000
 dim = 6
-
-def get_ordering(a, b, c):
-    vals = np.array([a, b, c])
-    return tuple(np.argsort(np.argsort(vals)))
 
 def generate_random_permutations(n, seed=None):
     if seed is not None:
@@ -36,21 +34,8 @@ def compute_J_Monte_Carlo(sigma, num_samples = 50000):
         x1 = (sigma[:, i] - 1.0 + np.random.rand(dim)) / n
         x2 = (sigma[:, j] - 1.0 + np.random.rand(dim)) / n
         x3 = (sigma[:, k] - 1.0 + np.random.rand(dim)) / n
-        # x1 = np.random.rand(dim)
-        # x2 = np.random.rand(dim) 
-        # x3 = np.random.rand(dim)
-        
-        # print(x1)
-        # print(x2)
-        # print(x3)
-        orderings = set()
-        for d in range(dim):
-            ordering = get_ordering(x1[d], x2[d], x3[d])
-            orderings.add(ordering)
-            if len(orderings) < d + 1: 
-                break
-       
-        if len(orderings) == 6:
+
+        if is_triple_good(x1, x2, x3):
             count += 1
 
     return count / num_samples

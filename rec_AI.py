@@ -1,6 +1,8 @@
 import numpy as np
 from numba import njit, prange
 
+from fw.shattering import is_shattered_triple
+
 S1 = [
   (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25),
   (18, 17, 19, 5, 4, 3, 24, 25, 23, 16, 13, 14, 10, 15, 11, 12, 9, 1, 0, 2, 22, 21, 20, 7, 6, 8),
@@ -20,61 +22,37 @@ def from_perms_to_tensor(perms):
         tensor.append(tmp)
     return tensor
 
-def recurence_construction(T, n):
+def recurence_construction(T, n, digits=None):
+    """Base-`len(digits)` digit expansion x -> N*x + digits[i], depth `n`.
+
+    `digits` defaults to `Sym_T[:3]` (the original 3-digit construction).
+    Any digit set whose vectors all sum to the same constant preserves the
+    central hyperplane H algebraically (see rec_construction_scaling.md).
+    """
+    if digits is None:
+        digits = Sym_T[:3]
     if n < 1:
         return T
-    N = 3
+    N = len(digits)
     new_T = []
     for x in T:
-        for i in range(N):
-            new_T.append( (N*x[0] + Sym_T[i][0],
-                           N*x[1] + Sym_T[i][1],
-                           N*x[2] + Sym_T[i][2],
-                           N*x[3] + Sym_T[i][3],
-                           N*x[4] + Sym_T[i][4],
-                           N*x[5] + Sym_T[i][5]) )
-    return recurence_construction(new_T, n-1)
+        for d in digits:
+            new_T.append( (N*x[0] + d[0],
+                           N*x[1] + d[1],
+                           N*x[2] + d[2],
+                           N*x[3] + d[3],
+                           N*x[4] + d[4],
+                           N*x[5] + d[5]) )
+    return recurence_construction(new_T, n-1, digits)
 
 S1_T = from_perms_to_tensor(S1)
 Sym_T = from_perms_to_tensor(Sym)
-
-@njit
-def get_order_code(a, b, c):
-    if a < b:
-        if b < c: return 0
-        elif a < c: return 1
-        else: return 3
-    else:
-        if a < c: return 2
-        elif b < c: return 4
-        else: return 5
-
-@njit
-def is_triple_good_fast(x1, x2, x3):
-    seen_mask = 0
-    unique_count = 0
-    for d in range(6):
-        v1, v2, v3 = x1[d], x2[d], x3[d]
-        if v1 == v2 or v1 == v3 or v2 == v3:
-            return False
-        
-        code = get_order_code(v1, v2, v3)
-        bit = 1 << code
-        
-        if (seen_mask & bit) == 0:
-            seen_mask |= bit
-            unique_count += 1
-            
-        if unique_count < d + 1:
-            return False
-            
-    return unique_count == 6
 
 @njit(parallel=True)
 def compute_J_fast(tensor_np):
     M = tensor_np.shape[0]
     total_good = 0
-    
+
     for i in prange(M):
         t1 = tensor_np[i]
         local_sum = 0
@@ -82,17 +60,15 @@ def compute_J_fast(tensor_np):
             t2 = tensor_np[j]
             for k in range(M):
                 t3 = tensor_np[k]
-                if is_triple_good_fast(t1, t2, t3):
+                if is_shattered_triple(t1, t2, t3):
                     local_sum += 1
         total_good += local_sum
-        
+
     return total_good / (M**3)
 
-# Uruchomienie
-start_T = S1_T
-tensor_list = recurence_construction(start_T, 5) # Test dla n = 3
-tensor_np = np.array(tensor_list, dtype=np.int64)
-
-# Pierwsze wywołanie rozgrzewa JIT
-result = compute_J_fast(tensor_np)
-print(f"Wynik dla n=4: {result}")
+if __name__ == "__main__":
+    start_T = S1_T
+    tensor_list = recurence_construction(start_T, 5)
+    tensor_np = np.array(tensor_list, dtype=np.int64)
+    result = compute_J_fast(tensor_np)
+    print(f"depth=5, M={len(tensor_list)}, J={result}")

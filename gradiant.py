@@ -1,6 +1,9 @@
 import numpy as np
 import random
 from itertools import permutations, combinations
+
+from fw.shattering import shattering_reference as is_triple_good
+
 N = 26
 
 S1 = [
@@ -11,21 +14,6 @@ S1 = [
   (2, 0, 1, 21, 22, 20, 24, 23, 25, 10, 9, 16, 15, 14, 13, 12, 11, 19, 18, 17, 3, 5, 4, 7, 8, 6),
   (16, 20, 19, 15, 11, 12, 4, 8, 7, 24, 3, 0, 22, 2, 25, 1, 23, 17, 21, 18, 14, 10, 13, 9, 5, 6)
 ] 
-
-def get_ordering(a, b, c):
-    vals = np.array([a, b, c])
-    return tuple(np.argsort(np.argsort(vals)))
-
-def is_triple_good(x1, x2, x3):
-    orderings = set()
-    for d in range(6):
-        if x1[d] == x2[d] or x1[d] == x3[d] or x2[d] == x3[d]:
-            break
-        ordering = get_ordering(x1[d], x2[d], x3[d])
-        orderings.add(ordering)
-        if len(orderings) < d + 1: 
-            break
-    return len(orderings) == 6
 
 def sample_gen(sample_count = 200):
     sample_set = []
